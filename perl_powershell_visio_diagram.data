@@ -1,0 +1,7 @@
+label = "Site A"
+ATTCLOUD,DEV1,Connector_Label,Connector_Type
+DEV1,DEV2,Connector_Label,Connector_Type
+DEV2,DEV3,Connector_Label,Connector_Type
+DEV2,DEV5,Connector_Label,Connector_Type
+DEV2,DEV4,Connector_Label,Connector_Type
+XOCLOUD,DEV4,Connector_Label,Connector_Type
