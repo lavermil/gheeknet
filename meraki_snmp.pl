@@ -1,66 +1,65 @@
-#!/usr/bin/perl
-#Author: Lance Vermilion
-#Purpose: Parse the output from a collection of SNMP info from the Meraki Cloud Controller
-
-# Sample of Expected Data Returned
-#MERAKI-CLOUD-CONTROLLER-MIB::devName.0.24.10.67.130.145 = STRING: Home-FW
-#MERAKI-CLOUD-CONTROLLER-MIB::devNetworkName.0.24.10.67.130.145 = STRING: Test-Meraki - appliance
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.0 = INTEGER: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.1 = INTEGER: 1
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.2 = INTEGER: 2
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.3 = INTEGER: 3
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.4 = INTEGER: 4
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.0 = STRING: wan1
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.1 = STRING: lan1
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.2 = STRING: lan2
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.3 = STRING: lan3
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.4 = STRING: lan4
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.0 = Counter32: 44391002
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.1 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.2 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.3 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.4 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.0 = Counter32: 29458512
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.1 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.2 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.3 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.4 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.0 = Counter32: 1159648430
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.1 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.2 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.3 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.4 = Counter32: 742385204
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.0 = Counter32: 2021640796
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.1 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.2 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.3 = Counter32: 0
-#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.4 = Counter32: 1354890845
-
 use strict;
+use warnings;
 use File::Path qw(make_path);
+use Fcntl qw(:flock SEEK_END);
 use Data::Dumper;
 use Storable qw(store retrieve freeze thaw dclone);
 
 my $debug = 1; # 0 = False, 1 = True 
 my $usedumper = 0; # 0 = False, 1 = True 
 my $tree = 0; # 0 = False, 1 = True 
-my $outputfound = 0; # 0 = False, 1 = True 
-my $comm_v2c = $ARGV[0];
-my $comm2file_dir = '/tmp/meraki';
-my $storable_dir = "$comm2file_dir/storable";
-my $storable_file = 0;
-my $cnt = 0;
-my $comm2file = "$comm2file_dir/comm2file.db";
+my $hostname = $ARGV[0];
+my $comm_v2c = $ARGV[1];
+my $base_dir = '/tmp/meraki';
+my $storable_dir = "$base_dir/storable";
+my $comm2file = "$base_dir/comm2file.db";
+my $logging = 1; # 0 = False, 1 = True
+my $logging_dir = "$base_dir/logs";
+my $logging_file = "$logging_dir/meraki_cloud.log";
 
-if ( ! $ARGV[0] )
+# Do not change these variables
+my $cnt = 0; 
+my $outputfound = 0; # 0 = False, 1 = True 
+my $storable_file = 0;
+
+# Hash Reference of Current Values polled (slurped from storage file).
+my $href_curr = {};
+# Hash Reference of Previous Values polled (slurped from storage file).
+my $href_prev = {};
+# Hash Reference of differences between the Current Values and Previous Values polled (slurped from storage file).
+my $href_diff = {};
+
+
+
+if ( ! $ARGV[0] || ! $ARGV[1] )
 {
   print "\n";
   print "#" x 52 . "\n";
-  print "# ERROR: No SNMPv2c Community String was provided! #\n";
+  print "# ERROR: No Hostname was provided! #\n" if ( ! $ARGV[0] || !( $ARGV[0] && $ARGV[1] ) );
+  print "# ERROR: No SNMPv2c Community String was provided! #\n" if ( ! $ARGV[1] || !( $ARGV[0] && $ARGV[1] ) );
   print "#" x 52 . "\n";
   print "\n";
-  print "Syntax: $0 <SNMP Read-Only Community String>\n\n";
+  print "Syntax: $0 <HOSTNAME> <SNMP Read-Only Community String>\n";
+  print "\n";
+  print "Note: The Hostname must match exactly to the name configured in the Meraki Dashbaord\n";
   exit 1;
+}
+
+
+# Function to append to a log file and acquire a lock on the file
+# This should be replaced with Log4perl when Log4perl becomes available on the systems
+sub SUB_appendLogs {
+    my $timedate = localtime;  
+    my $log_msg = shift;
+    open LOG_FILE, "+>>", $logging_file or warn "WARN: Cannot open logging file \"$logging_file\". :: $!"; 
+    flock (LOG_FILE, LOCK_EX) or warn "WARN: Cannot lock logging file: \"$logging_file\", failed to log $log_msg :: $!";
+
+    # After lock, move cursor to end of file, not really needed since we are appending, but better safe than sorry
+    seek (LOG_FILE, 0, SEEK_END) or warn "WARN: Cannot seek in logging file: \"$logging_file\". File updated before we did. :: $!";
+    print LOG_FILE "$timedate $comm_v2c $log_msg\n" if ( ! $ARGV[2] );
+    print "\n$timedate $comm_v2c $log_msg" if ( $debug || $log_msg =~ /FATAL/ );
+    flock (LOG_FILE, LOCK_UN) or warn "WARN: Cannot unlock logging file: \"$logging_file\". :: $!";
+    close LOG_FILE;
 }
 
 # Function to create directories (similar to mkdir -p)
@@ -91,47 +90,50 @@ sub SUB_mkdir
 }
 
 # Check if the following directories are created, if they are not then create them.
-SUB_mkdir($comm2file_dir);
+SUB_mkdir($base_dir);
 SUB_mkdir($storable_dir);
+SUB_mkdir($logging_dir);
+
+# Log variables used and their values
+SUB_appendLogs("Variable Values :: Debug: \"$debug\", UseDumper: \"$usedumper\", Tree: \"$tree\", Hostname: \"$hostname\", Community: \"$comm_v2c\", BaseDir: \"$base_dir\", StorableDir: \"$storable_dir\", Comm2File: \"$comm2file\", Logging: \"$logging\", LoggingDir: \"$logging_dir\", LoggingFile: \"$logging_file\"");
 
 # If the comm2file does not exist then create it, even if it is empty we can then populate it later
-open my $comm2file_fh, ">>$comm2file" or die "Can't open file: $comm2file : $!\n" if ( ! -f $comm2file );
+if ( ! -f $comm2file )
+{
+  open my $comm2file_fh, ">>$comm2file" or die SUB_appendLogs("FATAL: Cannot create comm2file file: \"$comm2file\" :: $!");
+  if ( -f $comm2file )
+  {
+    SUB_appendLogs("Created comm2file file: \"$comm2file\".");
+  }
+}
 
 # Check the comm2file_fh for the community string to determine the filename holding the last polled data
-open my $comm2file_fh, "$comm2file" or die "Can't open file: $comm2file : $!\n";
+open my $comm2file_fh, "$comm2file" or die SUB_appendLogs("FATAL: Cannot open comm2file file: \"$comm2file\" :: $!");
 while (<$comm2file_fh>)
 {
-  if ( /$comm_v2c/ )
+  if ( /^$comm_v2c = / )
   {
     (undef, $storable_file)  = split(/ = /, $_);
     chomp($storable_file);
+    SUB_appendLogs("Community \"$comm_v2c\" matched in file \"$comm2file\". Using Storable file \"$storable_file\".");
   }
   $cnt++;
 }
 close $comm2file_fh;
+print $storable_file;
+
+SUB_appendLogs("NOTICE: Community \"$comm_v2c\" NOT matched in file \"$comm2file\".") if ( ! $storable_file );
 
 # Write to comm2file_fh with the reference to the new filename
-if ( ! -f $storable_file )
+if ( ! -f $storable_file && ! $storable_file )
 {
-  my $new_storable_file = "$storable_dir/$cnt" . "_storable.db";
-  open my $comm2file_fh, ">>$comm2file" or die "Can't open file: $comm2file : $!\n";
+  my $new_storable_file = "$storable_dir/$cnt" . "_storable.data";
+  open my $comm2file_fh, ">>$comm2file" or die SUB_appendLogs("FATAL: Cannot open comm2file file \"$comm2file\" :: $!");
     print $comm2file_fh "$comm_v2c = $new_storable_file\n";
   close $comm2file_fh;
   $storable_file = $new_storable_file;
+  SUB_appendLogs("Assigned SNMP Community \"$comm_v2c\" to Storable file \"$storable_file\" in comm2file file: \"$comm2file\".");
 }
-
-print "Performing snmpwalk of \"snmp.meraki.com:16100\" using SNMPv2c community string of \"$comm_v2c\"\n" if ( $debug );
-open(SNMPWALK, "snmpwalk -v2c -c $comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |") or die "Failed to run snmpwalk! :: $!\n";
-
-# Hash Reference of Current Values polled (slurped from storage file).
-my $href_curr = {};
-
-# Hash Reference of Previous Values polled (slurped from storage file).
-my $href_prev = {};
-
-# Hash Reference of differences between the Current Values and Previous Values polled (slurped from storage file).
-my $href_diff = {};
-
 
 # Store all values in a file because we have to know three things.
 # 1. Previous values polled
@@ -144,8 +146,20 @@ my $href_diff = {};
 #       assume the device has rebooted and start counting over. At a later date we can consider polling the device for its uptime 
 #       (which currently is stored in date format and not timestamp/timeticks).
 
-$href_prev = retrieve($storable_file) or die "Can't open '$storable_file' :$!\n" if ( -f $storable_file );
+if ( -f $storable_file )
+{
+  $href_prev = retrieve($storable_file) or SUB_appendLogs("WARN: Cannot open storable file: \"$storable_file\" :: $!");
+  SUB_appendLogs("Retrieved previous collection of values from storable file: \"$storable_file\".");
+}
+else
+{
+  SUB_appendLogs("NOTICE: Storable file: \"$storable_file\" does not exist and NO previously collected values available.");
+}
 
+  
+SUB_appendLogs("Performing snmpwalk of \"snmp.meraki.com:16100\" using SNMPv2c community string of \"$comm_v2c\"");
+SUB_appendLogs("Running SNMPWALK: \"snmpwalk -v2c -c $comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |\"");
+open(SNMPWALK, "snmpwalk -v2c -c $comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |") or die SUB_appendLogs("FATAL: Cannot to run snmpwalk! :: $!");
 
 # Used to test against static set of data in a file. Content in the file should come from the 
 # output of the open(SNMPWALK... line above. If you uncomment the lines below comment the 
@@ -244,18 +258,17 @@ if ( $usedumper )
 # Copy href_curr to href_diff
 $href_diff = $href_curr;
 
-print "\n";
-print "#" x 10 . "\n";
-print "# Output #\n";
-print "#" x 10 . "\n";
 for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
 {
-  my $hostname = $href_curr->{$comm_v2c}->{$oid}->{'devName'};
+  my $devName = $href_curr->{$comm_v2c}->{$oid}->{'devName'};
+  $devName =~ s/\s+/-/g;
   my $network = $href_curr->{$comm_v2c}->{$oid}->{'NetworkName'};
+  $network =~ s/\s+/-/g;
   if ( $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'} )
   {
-    $outputfound = 1;
-    print "$network\n  - $hostname\n" if ( $tree );
+    $outputfound = 1 if ( $tree );
+    # Never prints to Log if $tree
+    print "$network\n  - $devName\n" if ( $tree );
     for my $ii (@{$href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndexes'}})
     {
       my $InterfaceName = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceName'};
@@ -297,12 +310,14 @@ for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
       }
 
 
-      if ( ! $tree ) 
+      if ( ! $tree && $hostname eq $devName ) 
       {
-        print "$network,$hostname,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes\n";
+        $outputfound = 1;
+        SUB_appendLogs("$network,$devName,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes");
       }
-      else
+      elsif ( $tree )
       {
+        # Never prints to Log if $tree
         print "    - $InterfaceName\n      - $DIFF_InterfaceSentPkts\n      - $DIFF_InterfaceRecvPkts\n      - $DIFF_InterfaceSentBytes\n      - $DIFF_InterfaceRecvBytes\n";
       }
     }
@@ -311,8 +326,11 @@ for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
   {
   }
 }
-print "No Output!\n" if ( ! $outputfound );
-print "\n";
+SUB_appendLogs("NOTICE: No interface counters found for Hostname: \"$hostname\"!") if ( ! $outputfound );
 
 # Save for reference on next poll
-store($href_curr, $storable_file) or die "Can't open '$storable_file' :$!\n";
+store($href_curr, $storable_file) or die SUB_appendLogs("FATAL: Cannot to open storable file \"$storable_file\" :: $!");
+SUB_appendLogs("Saved current collection of values to storable file: \"$storable_file\".");
+print "\n" if ( $debug );
+
+close SNMPWALK;
