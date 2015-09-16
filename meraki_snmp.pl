@@ -1,4 +1,4 @@
-#!/usr/local/bin/perl
+#!/usr/bin/perl
 #Author: Lance Vermilion
 #Purpose: Parse the output from a collection of SNMP info from the Meraki Cloud Controller
 
