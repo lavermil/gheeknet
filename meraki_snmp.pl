@@ -42,7 +42,7 @@ use Fcntl qw(:flock SEEK_END);
 use Data::Dumper;
 use Storable qw(store retrieve freeze thaw dclone);
 
-my $debug = 1; # 0 = False, 1 = True 
+my $debug = 0; # 0 = False, 1 = True 
 my $usedumper = 0; # 0 = False, 1 = True 
 my $tree = 0; # 0 = False, 1 = True 
 my $hostname = $ARGV[0];
@@ -90,15 +90,18 @@ if ( ! $ARGV[0] || ! $ARGV[1] )
 sub SUB_appendLogs {
     my $timedate = localtime;  
     my $log_msg = shift;
-    open LOG_FILE, "+>>", $logging_file or warn "WARN: Cannot open logging file \"$logging_file\". :: $!"; 
-    flock (LOG_FILE, LOCK_EX) or warn "WARN: Cannot lock logging file: \"$logging_file\", failed to log $log_msg :: $!";
-
-    # After lock, move cursor to end of file, not really needed since we are appending, but better safe than sorry
-    seek (LOG_FILE, 0, SEEK_END) or warn "WARN: Cannot seek in logging file: \"$logging_file\". File updated before we did. :: $!";
-    print LOG_FILE "$timedate $comm_v2c $log_msg\n" if ( ! $ARGV[2] );
-    print "\n$timedate $comm_v2c $log_msg" if ( $debug || $log_msg =~ /FATAL/ );
-    flock (LOG_FILE, LOCK_UN) or warn "WARN: Cannot unlock logging file: \"$logging_file\". :: $!";
-    close LOG_FILE;
+    if ( $logging )
+    {
+      open LOG_FILE, "+>>", $logging_file or warn "WARN: Cannot open logging file \"$logging_file\". :: $!"; 
+      flock (LOG_FILE, LOCK_EX) or warn "WARN: Cannot lock logging file: \"$logging_file\", failed to log $log_msg :: $!";
+  
+      # After lock, move cursor to end of file, not really needed since we are appending, but better safe than sorry
+      seek (LOG_FILE, 0, SEEK_END) or warn "WARN: Cannot seek in logging file: \"$logging_file\". File updated before we did. :: $!";
+      print LOG_FILE "$timedate $comm_v2c $log_msg\n" if ( ! $ARGV[2] );
+      print "\n$timedate $comm_v2c $log_msg" if ( $debug || $log_msg =~ /FATAL/ );
+      flock (LOG_FILE, LOCK_UN) or warn "WARN: Cannot unlock logging file: \"$logging_file\". :: $!";
+      close LOG_FILE;
+    }
 }
 
 # Function to create directories (similar to mkdir -p)
@@ -159,7 +162,6 @@ while (<$comm2file_fh>)
   $cnt++;
 }
 close $comm2file_fh;
-print $storable_file;
 
 SUB_appendLogs("NOTICE: Community \"$comm_v2c\" NOT matched in file \"$comm2file\".") if ( ! $storable_file );
 
@@ -358,7 +360,7 @@ for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
         $devName =~ s/\s+/-/g;
         $network =~ s/\s+/-/g;
         $outputfound = 1;
-        print "$network,$devName,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes\n";
+        SUB_appendLogs("$network,$devName,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes");
       }
       elsif ( $tree )
       {
