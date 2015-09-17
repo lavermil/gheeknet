@@ -1,3 +1,40 @@
+#!/usr/local/bin/perl
+#Purpose: Parse the output from a collection of SNMP info from the Meraki Cloud Controller
+
+# Sample of Expected Data Returned
+#MERAKI-CLOUD-CONTROLLER-MIB::devName.0.24.10.67.130.145 = STRING: Home-FW
+#MERAKI-CLOUD-CONTROLLER-MIB::devNetworkName.0.24.10.67.130.145 = STRING: Test-Meraki - appliance
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.0 = INTEGER: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.1 = INTEGER: 1
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.2 = INTEGER: 2
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.3 = INTEGER: 3
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceIndex.0.24.10.67.130.145.4 = INTEGER: 4
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.0 = STRING: wan1
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.1 = STRING: lan1
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.2 = STRING: lan2
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.3 = STRING: lan3
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceName.0.24.10.67.130.145.4 = STRING: lan4
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.0 = Counter32: 44391002
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.1 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.2 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.3 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentPkts.0.24.10.67.130.145.4 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.0 = Counter32: 29458512
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.1 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.2 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.3 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvPkts.0.24.10.67.130.145.4 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.0 = Counter32: 1159648430
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.1 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.2 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.3 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceSentBytes.0.24.10.67.130.145.4 = Counter32: 742385204
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.0 = Counter32: 2021640796
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.1 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.2 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.3 = Counter32: 0
+#MERAKI-CLOUD-CONTROLLER-MIB::devInterfaceRecvBytes.0.24.10.67.130.145.4 = Counter32: 1354890845
+
 use strict;
 use warnings;
 use File::Path qw(make_path);
@@ -10,6 +47,8 @@ my $usedumper = 0; # 0 = False, 1 = True
 my $tree = 0; # 0 = False, 1 = True 
 my $hostname = $ARGV[0];
 my $comm_v2c = $ARGV[1];
+chomp($hostname);
+chomp($comm_v2c);
 my $base_dir = '/tmp/meraki';
 my $storable_dir = "$base_dir/storable";
 my $comm2file = "$base_dir/comm2file.db";
@@ -194,7 +233,7 @@ for my $line (<SNMPWALK>)
     my $tmpname = $line;
     $tmpname =~ s/.*devInterfaceIndex\.//g;
     my ($oid_piece, $devInterfaceIndex) = split(/ = INTEGER: /, $tmpname);
-    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.?)/);
+    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
     push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
     push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndexes'}}, $devInterfaceIndex);
     $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceName'} = '';
@@ -208,7 +247,7 @@ for my $line (<SNMPWALK>)
     my $tmpname = $line;
     $tmpname =~ s/.*devInterfaceName\.//g;
     my ($oid_piece, $devInterfaceName) = split(/ = STRING: /, $tmpname);
-    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.?)/);
+    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
     push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
     $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceName'} = $devInterfaceName;
   }
@@ -217,7 +256,7 @@ for my $line (<SNMPWALK>)
     my $tmpname = $line;
     $tmpname =~ s/.*devInterfaceSentPkts\.//g;
     my ($oid_piece, $devInterfaceSentPkts) = split(/ = Counter32: /, $tmpname);
-    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.?)/);
+    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
     push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
     $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceSentPkts'} = $devInterfaceSentPkts;
   }
@@ -226,7 +265,7 @@ for my $line (<SNMPWALK>)
     my $tmpname = $line;
     $tmpname =~ s/.*devInterfaceRecvPkts\.//g;
     my ($oid_piece, $devInterfaceRecvPkts) = split(/ = Counter32: /, $tmpname);
-    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.?)/);
+    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
     push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
     $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceRecvPkts'} = $devInterfaceRecvPkts;
   }
@@ -235,7 +274,7 @@ for my $line (<SNMPWALK>)
     my $tmpname = $line;
     $tmpname =~ s/.*devInterfaceSentBytes\.//g;
     my ($oid_piece, $devInterfaceSentBytes) = split(/ = Counter32: /, $tmpname);
-    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.?)/);
+    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
     push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
     $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceSentBytes'} = $devInterfaceSentBytes;
   }
@@ -244,7 +283,7 @@ for my $line (<SNMPWALK>)
     my $tmpname = $line;
     $tmpname =~ s/.*devInterfaceRecvBytes\.//g;
     my ($oid_piece, $devInterfaceRecvBytes) = split(/ = Counter32: /, $tmpname);
-    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.?)/);
+    ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
     push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
     $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceRecvBytes'} = $devInterfaceRecvBytes;
   }
@@ -260,16 +299,21 @@ $href_diff = $href_curr;
 
 for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
 {
-  my $devName = $href_curr->{$comm_v2c}->{$oid}->{'devName'};
-  $devName =~ s/\s+/-/g;
-  my $network = $href_curr->{$comm_v2c}->{$oid}->{'NetworkName'};
-  $network =~ s/\s+/-/g;
+  my $devName = $hostname; # Assign the devName to be the same as the hostname to account for when the device has yet to be named through the dashboard. Otherwise it is blank
+  my $network = '';
+  $devName = $href_curr->{$comm_v2c}->{$oid}->{'devName'} if ( $href_curr->{$comm_v2c}->{$oid}->{'devName'} );
+  $network = $href_curr->{$comm_v2c}->{$oid}->{'NetworkName'} if ($href_curr->{$comm_v2c}->{$oid}->{'NetworkName'} );
   if ( $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'} )
   {
-    $outputfound = 1 if ( $tree );
-    # Never prints to Log if $tree
-    print "$network\n  - $devName\n" if ( $tree );
-    for my $ii (@{$href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndexes'}})
+    if ( $tree )
+    {
+      $outputfound = 1 if ( $tree );
+      $devName =~ s/\s+/-/g; # Remove spaces and replace with dashes
+      $network =~ s/\s+/-/g; # Remove spaces and replace with dashes
+      # Never prints to Log if $tree
+      print "$network\n  - $devName\n";
+    }
+    for my $ii ( sort {$a <=> $b} @{$href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndexes'}})
     {
       my $InterfaceName = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceName'};
       my $CURR_InterfaceSentPkts = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'};
@@ -309,11 +353,20 @@ for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
         $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'} = $DIFF_InterfaceRecvBytes; 
       }
 
-
       if ( ! $tree && $hostname eq $devName ) 
       {
+        $devName =~ s/\s+/-/g;
+        $network =~ s/\s+/-/g;
         $outputfound = 1;
-        SUB_appendLogs("$network,$devName,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes");
+        #print "$network,$devName,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes\n";
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t SentPkts -v $DIFF_InterfaceSentPkts -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t SentPkts -v $DIFF_InterfaceSentPkts -i 300");
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t RecvPkts -v $DIFF_InterfaceRecvPkts -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t RecvPkts -v $DIFF_InterfaceRecvPkts -i 300");
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t SentBytes -v $DIFF_InterfaceSentBytes -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t SentBytes -v $DIFF_InterfaceSentBytes -i 300");
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t RecvBytes -v $DIFF_InterfaceRecvBytes -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t RecvBytes -v $DIFF_InterfaceRecvBytes -i 300");
       }
       elsif ( $tree )
       {
