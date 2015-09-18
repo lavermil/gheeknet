@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/local/bin/perl
 #Purpose: Parse the output from a collection of SNMP info from the Meraki Cloud Controller
 
 # Sample of Expected Data Returned
@@ -91,6 +91,12 @@ my $href_diff = {};
 sub SUB_appendLogs {
     my $timedate = localtime;  
     my $log_msg = shift;
+    my $FATAL_VARS_MISSING = 0;
+    if ( $log_msg =~ /FATAL_VARS_MISSING/ )
+    {
+      $log_msg =~ s/FATAL_VARS_MISSING//g;
+      $FATAL_VARS_MISSING = 1;
+    }
     if ( $logging )
     {
       open LOG_FILE, "+>>", $logging_file or warn "WARN: Cannot open logging file \"$logging_file\". :: $!"; 
@@ -99,7 +105,7 @@ sub SUB_appendLogs {
       # After lock, move cursor to end of file, not really needed since we are appending, but better safe than sorry
       seek (LOG_FILE, 0, SEEK_END) or warn "WARN: Cannot seek in logging file: \"$logging_file\". File updated before we did. :: $!";
       print LOG_FILE "$timedate $org_comm_v2c $log_msg\n" if ( ! $ARGV[2] );
-      print "\n$timedate $org_comm_v2c $log_msg" if ( $debug || $log_msg =~ /FATAL/ );
+      print "$timedate $org_comm_v2c $log_msg\n" if ( $debug || $log_msg =~ /FATAL/ || $FATAL_VARS_MISSING );
       flock (LOG_FILE, LOCK_UN) or warn "WARN: Cannot unlock logging file: \"$logging_file\". :: $!";
       close LOG_FILE;
     }
@@ -169,20 +175,19 @@ SUB_mkdir($logging_dir);
 #if ( ! $ARGV[0] || ! $ARGV[1] )
 if ( ! length($hostname) || ! length($org_comm_v2c) )
 {
-  SUB_appendLogs("");
   my $marker = "#" x 52;
-  SUB_appendLogs("$marker");
-  SUB_appendLogs("# ERROR: No Hostname was provided! #") if ( ! $hostname );
-  SUB_appendLogs("# ERROR: No SNMPv2c Community String was provided! #") if ( ! $org_comm_v2c );
-  SUB_appendLogs("$marker");
-  SUB_appendLogs("");
-  SUB_appendLogs("Provided:");
-  SUB_appendLogs("          Hostname(s): $hostname");
-  SUB_appendLogs("          Community:   $org_comm_v2c");
-  SUB_appendLogs("");
-  SUB_appendLogs("Syntax: $0 <HOSTNAME> <SNMP Read-Only Community String>");
-  SUB_appendLogs("");
-  SUB_appendLogs("Note: The Hostname must match exactly to the name configured in the Meraki Dashbaord");
+  SUB_appendLogs("FATAL_VARS_MISSING$marker");
+  SUB_appendLogs("FATAL_VARS_MISSING# ERROR: No Hostname was provided! #") if ( ! $hostname );
+  SUB_appendLogs("FATAL_VARS_MISSING# ERROR: No SNMPv2c Community String was provided! #") if ( ! $org_comm_v2c );
+  SUB_appendLogs("FATAL_VARS_MISSING$marker");
+  SUB_appendLogs("FATAL_VARS_MISSING");
+  SUB_appendLogs("FATAL_VARS_MISSINGProvided:");
+  SUB_appendLogs("FATAL_VARS_MISSING          Hostname(s): $hostname");
+  SUB_appendLogs("FATAL_VARS_MISSING          Community:   $org_comm_v2c");
+  SUB_appendLogs("FATAL_VARS_MISSING");
+  SUB_appendLogs("FATAL_VARS_MISSINGSyntax: $0 <HOSTNAME> <SNMP Read-Only Community String>");
+  SUB_appendLogs("FATAL_VARS_MISSING");
+  SUB_appendLogs("FATAL_VARS_MISSINGNote: The Hostname must match exactly to the name configured in the Meraki Dashbaord");
   exit 1;
 }
 
@@ -411,7 +416,15 @@ for my $oid ( sort keys %{$href_curr->{$org_comm_v2c}} )
         $devName =~ s/\s+/-/g;
         $network =~ s/\s+/-/g;
         $outputfound = 1;
-        SUB_appendLogs("$network,$devName,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes");
+        #print "$network,$devName,$InterfaceName,$DIFF_InterfaceSentPkts,$DIFF_InterfaceRecvPkts,$DIFF_InterfaceSentBytes,$DIFF_InterfaceRecvBytes\n";
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t SentPkts -v $DIFF_InterfaceSentPkts -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t SentPkts -v $DIFF_InterfaceSentPkts -i 300");
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t RecvPkts -v $DIFF_InterfaceRecvPkts -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_PACKETS -s $network:$devName:$InterfaceName -t RecvPkts -v $DIFF_InterfaceRecvPkts -i 300");
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t SentBytes -v $DIFF_InterfaceSentBytes -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t SentBytes -v $DIFF_InterfaceSentBytes -i 300");
+        #print "/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t RecvBytes -v $DIFF_InterfaceRecvBytes -i 300\n";
+        SUB_appendLogs("/opt/nimsoft/bin/nimqos -q QOS_INTERFACE_TRAFFIC -s $network:$devName:$InterfaceName -t RecvBytes -v $DIFF_InterfaceRecvBytes -i 300");
       }
       elsif ( $tree )
       {
