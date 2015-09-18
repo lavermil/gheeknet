@@ -333,25 +333,25 @@ for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
       if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'} )
       {
         my $PREV_InterfaceSentPkts = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'};
-        $DIFF_InterfaceSentPkts -= $CURR_InterfaceSentPkts if ( $CURR_InterfaceSentPkts >= $PREV_InterfaceSentPkts );
+        $DIFF_InterfaceSentPkts -= $PREV_InterfaceSentPkts if ( $CURR_InterfaceSentPkts >= $PREV_InterfaceSentPkts );
         $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'} = $DIFF_InterfaceSentPkts; 
       }
       if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'} )
       {
         my $PREV_InterfaceRecvPkts = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'};
-        $DIFF_InterfaceRecvPkts -= $CURR_InterfaceRecvPkts if ( $CURR_InterfaceRecvPkts >= $PREV_InterfaceRecvPkts );
+        $DIFF_InterfaceRecvPkts -= $PREV_InterfaceRecvPkts if ( $CURR_InterfaceRecvPkts >= $PREV_InterfaceRecvPkts );
         $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'} = $DIFF_InterfaceRecvPkts; 
       }
       if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'} )
       {
         my $PREV_InterfaceSentBytes = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'};
-        $DIFF_InterfaceSentBytes -= $CURR_InterfaceSentBytes if ( $CURR_InterfaceSentBytes >= $PREV_InterfaceSentBytes );
+        $DIFF_InterfaceSentBytes -= $PREV_InterfaceSentBytes if ( $CURR_InterfaceSentBytes >= $PREV_InterfaceSentBytes );
         $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'} = $DIFF_InterfaceSentBytes; 
       }
       if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'} )
       {
         my $PREV_InterfaceRecvBytes = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'};
-        $DIFF_InterfaceRecvBytes -= $CURR_InterfaceRecvBytes if ( $CURR_InterfaceRecvBytes >= $PREV_InterfaceRecvBytes );
+        $DIFF_InterfaceRecvBytes -= $PREV_InterfaceRecvBytes if ( $CURR_InterfaceRecvBytes >= $PREV_InterfaceRecvBytes );
         $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'} = $DIFF_InterfaceRecvBytes; 
       }
 
