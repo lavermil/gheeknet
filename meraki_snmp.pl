@@ -42,19 +42,35 @@ use Fcntl qw(:flock SEEK_END);
 use Data::Dumper;
 use Storable qw(store retrieve freeze thaw dclone);
 
-my $debug = 0; # 0 = False, 1 = True 
-my $usedumper = 0; # 0 = False, 1 = True 
-my $tree = 0; # 0 = False, 1 = True 
-my $hostname = $ARGV[0];
-my $comm_v2c = $ARGV[1];
-chomp($hostname);
-chomp($comm_v2c);
-my $base_dir = '/tmp/meraki';
-my $storable_dir = "$base_dir/storable";
-my $comm2file = "$base_dir/comm2file.db";
-my $logging = 1; # 0 = False, 1 = True
-my $logging_dir = "$base_dir/logs";
-my $logging_file = "$logging_dir/meraki_cloud.log";
+my $config = '/tmp/meraki_snmp.conf';
+
+# Get our configuration information
+if (my $err = SUB_ReadCfg($config)) {
+    print(STDERR $err, "\n");
+    exit(1);
+}
+
+my $debug            = $CFG::meraki{'options'}{'debug'};
+my $usedumper        = $CFG::meraki{'options'}{'usedumper'};
+my $tree             = $CFG::meraki{'options'}{'tree'};
+my $org              = '';
+for my $k ( keys %{$CFG::meraki{'organization'}} ) { $org = $k };
+my @networks         = keys %{$CFG::meraki{'organization'}{$org}{'network'}};
+my @hostnames        = ();
+for my $network (@networks) { for my $host ( keys %{$CFG::meraki{'organization'}{$org}{'network'}{$network}} ) { push(@hostnames, $host) if ( $host !~ /^network_snmp/ && $CFG::meraki{'organization'}{$org}{'network'}{$network}{$host} ) } };
+my $hostname         = '';
+$hostname         = join('|', @hostnames);
+my $org_comm_v2c     = '';
+$org_comm_v2c     = $CFG::meraki{'organization'}{$org}{'org_snmp_comm_v2c'} if ( $CFG::meraki{'organization'}{$org}{'org_snmp_enabled'} );
+my @network_snmp_comm_v2c = ();
+for my $network (@networks) { push(@network_snmp_comm_v2c, "$network,$CFG::meraki{'organization'}{$org}{'network'}{$network}{'network_snmp_comm_v2c'}") if ( $CFG::meraki{'organization'}{$org}{'network'}{$network}{'network_snmp_enabled'} ) };
+my $network_comm_v2c = join(',', @network_snmp_comm_v2c);
+my $base_dir         = $CFG::meraki{'setup'}{'base_dir'};
+my $storable_dir     = "$base_dir/$CFG::meraki{'setup'}{'storable_dir'}";
+my $comm2file        = "$base_dir/$CFG::meraki{'setup'}{'comm2file'}";
+my $logging          = $CFG::meraki{'setup'}{'log'}{'logging'};
+my $logging_dir      = "$base_dir/$CFG::meraki{'setup'}{'log'}{'logging_dir'}";
+my $logging_file     = "$logging_dir/$CFG::meraki{'setup'}{'log'}{'logging_file'}";
 
 # Do not change these variables
 my $cnt = 0; 
@@ -70,21 +86,6 @@ my $href_diff = {};
 
 
 
-if ( ! $ARGV[0] || ! $ARGV[1] )
-{
-  print "\n";
-  print "#" x 52 . "\n";
-  print "# ERROR: No Hostname was provided! #\n" if ( ! $ARGV[0] || !( $ARGV[0] && $ARGV[1] ) );
-  print "# ERROR: No SNMPv2c Community String was provided! #\n" if ( ! $ARGV[1] || !( $ARGV[0] && $ARGV[1] ) );
-  print "#" x 52 . "\n";
-  print "\n";
-  print "Syntax: $0 <HOSTNAME> <SNMP Read-Only Community String>\n";
-  print "\n";
-  print "Note: The Hostname must match exactly to the name configured in the Meraki Dashbaord\n";
-  exit 1;
-}
-
-
 # Function to append to a log file and acquire a lock on the file
 # This should be replaced with Log4perl when Log4perl becomes available on the systems
 sub SUB_appendLogs {
@@ -97,11 +98,39 @@ sub SUB_appendLogs {
   
       # After lock, move cursor to end of file, not really needed since we are appending, but better safe than sorry
       seek (LOG_FILE, 0, SEEK_END) or warn "WARN: Cannot seek in logging file: \"$logging_file\". File updated before we did. :: $!";
-      print LOG_FILE "$timedate $comm_v2c $log_msg\n" if ( ! $ARGV[2] );
-      print "\n$timedate $comm_v2c $log_msg" if ( $debug || $log_msg =~ /FATAL/ );
+      print LOG_FILE "$timedate $org_comm_v2c $log_msg\n" if ( ! $ARGV[2] );
+      print "\n$timedate $org_comm_v2c $log_msg" if ( $debug || $log_msg =~ /FATAL/ );
       flock (LOG_FILE, LOCK_UN) or warn "WARN: Cannot unlock logging file: \"$logging_file\". :: $!";
       close LOG_FILE;
     }
+}
+
+# Read a configuration file
+#   The arg can be a relative or full path, or
+#   it can be a file located somewhere in @INC.
+sub SUB_ReadCfg
+{
+    my $file = $_[0];
+
+    our $err;
+
+    {   # Put config data into a separate namespace
+        package CFG;
+
+        # Process the contents of the config file
+        my $rc = do($file);
+
+        # Check for errors
+        if ($@) {
+            $::err = "ERROR: Failure compiling '$file' - $@";
+        } elsif (! defined($rc)) {
+            $::err = "ERROR: Failure reading '$file' - $!";
+        } elsif (! $rc) {
+            $::err = "ERROR: Failure processing '$file'";
+        }
+    }
+
+    return ($err);
 }
 
 # Function to create directories (similar to mkdir -p)
@@ -136,8 +165,30 @@ SUB_mkdir($base_dir);
 SUB_mkdir($storable_dir);
 SUB_mkdir($logging_dir);
 
+
+#if ( ! $ARGV[0] || ! $ARGV[1] )
+if ( ! length($hostname) || ! length($org_comm_v2c) )
+{
+  SUB_appendLogs("");
+  my $marker = "#" x 52;
+  SUB_appendLogs("$marker");
+  SUB_appendLogs("# ERROR: No Hostname was provided! #") if ( ! $hostname );
+  SUB_appendLogs("# ERROR: No SNMPv2c Community String was provided! #") if ( ! $org_comm_v2c );
+  SUB_appendLogs("$marker");
+  SUB_appendLogs("");
+  SUB_appendLogs("Provided:");
+  SUB_appendLogs("          Hostname(s): $hostname");
+  SUB_appendLogs("          Community:   $org_comm_v2c");
+  SUB_appendLogs("");
+  SUB_appendLogs("Syntax: $0 <HOSTNAME> <SNMP Read-Only Community String>");
+  SUB_appendLogs("");
+  SUB_appendLogs("Note: The Hostname must match exactly to the name configured in the Meraki Dashbaord");
+  exit 1;
+}
+
+
 # Log variables used and their values
-SUB_appendLogs("Variable Values :: Debug: \"$debug\", UseDumper: \"$usedumper\", Tree: \"$tree\", Hostname: \"$hostname\", Community: \"$comm_v2c\", BaseDir: \"$base_dir\", StorableDir: \"$storable_dir\", Comm2File: \"$comm2file\", Logging: \"$logging\", LoggingDir: \"$logging_dir\", LoggingFile: \"$logging_file\"");
+SUB_appendLogs("Variable Values :: Debug: \"$debug\", UseDumper: \"$usedumper\", Tree: \"$tree\", Hostname(s): \"$hostname\", Org Communities: \"$org_comm_v2c\", Network-Wide Communities: \"$network_comm_v2c\", BaseDir: \"$base_dir\", StorableDir: \"$storable_dir\", Comm2File: \"$comm2file\", Logging: \"$logging\", LoggingDir: \"$logging_dir\", LoggingFile: \"$logging_file\"");
 
 # If the comm2file does not exist then create it, even if it is empty we can then populate it later
 if ( ! -f $comm2file )
@@ -153,28 +204,29 @@ if ( ! -f $comm2file )
 open my $comm2file_fh, "$comm2file" or die SUB_appendLogs("FATAL: Cannot open comm2file file: \"$comm2file\" :: $!");
 while (<$comm2file_fh>)
 {
-  if ( /^$comm_v2c = / )
+  if ( /^$org_comm_v2c = / )
   {
     (undef, $storable_file)  = split(/ = /, $_);
     chomp($storable_file);
-    SUB_appendLogs("Community \"$comm_v2c\" matched in file \"$comm2file\". Using Storable file \"$storable_file\".");
+    SUB_appendLogs("Community \"$org_comm_v2c\" matched in file \"$comm2file\". Using Storable file \"$storable_file\".");
   }
   $cnt++;
 }
 close $comm2file_fh;
 
-SUB_appendLogs("NOTICE: Community \"$comm_v2c\" NOT matched in file \"$comm2file\".") if ( ! $storable_file );
+SUB_appendLogs("NOTICE: Community \"$org_comm_v2c\" NOT matched in file \"$comm2file\".") if ( ! $storable_file );
 
 # Write to comm2file_fh with the reference to the new filename
 if ( ! -f $storable_file && ! $storable_file )
 {
   my $new_storable_file = "$storable_dir/$cnt" . "_storable.data";
   open my $comm2file_fh, ">>$comm2file" or die SUB_appendLogs("FATAL: Cannot open comm2file file \"$comm2file\" :: $!");
-    print $comm2file_fh "$comm_v2c = $new_storable_file\n";
+    print $comm2file_fh "$org_comm_v2c = $new_storable_file\n";
   close $comm2file_fh;
   $storable_file = $new_storable_file;
-  SUB_appendLogs("Assigned SNMP Community \"$comm_v2c\" to Storable file \"$storable_file\" in comm2file file: \"$comm2file\".");
+  SUB_appendLogs("Assigned SNMP Community \"$org_comm_v2c\" to Storable file \"$storable_file\" in comm2file file: \"$comm2file\".");
 }
+
 
 # Store all values in a file because we have to know three things.
 # 1. Previous values polled
@@ -197,10 +249,9 @@ else
   SUB_appendLogs("NOTICE: Storable file: \"$storable_file\" does not exist and NO previously collected values available.");
 }
 
-  
-SUB_appendLogs("Performing snmpwalk of \"snmp.meraki.com:16100\" using SNMPv2c community string of \"$comm_v2c\"");
-SUB_appendLogs("Running SNMPWALK: \"snmpwalk -v2c -c $comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |\"");
-open(SNMPWALK, "snmpwalk -v2c -c $comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |") or die SUB_appendLogs("FATAL: Cannot to run snmpwalk! :: $!");
+SUB_appendLogs("Performing snmpwalk of \"snmp.meraki.com:16100\" using SNMPv2c community string of \"$org_comm_v2c\"");
+SUB_appendLogs("Running SNMPWALK: \"snmpwalk -v2c -c $org_comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |\"");
+open(SNMPWALK, "snmpwalk -v2c -c $org_comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |") or die SUB_appendLogs("FATAL: Cannot to run snmpwalk! :: $!");
 
 # Used to test against static set of data in a file. Content in the file should come from the 
 # output of the open(SNMPWALK... line above. If you uncomment the lines below comment the 
@@ -217,8 +268,8 @@ for my $line (<SNMPWALK>)
     my $tmpname = $line;
     $tmpname =~ s/.*devName\.//g;
     my ($oid_piece, $devName) = split(/ = STRING: /, $tmpname);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devName'} = $devName;
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devName'} = $devName;
   }
   elsif ( $line =~ /devNetworkName/ )
   {
@@ -226,9 +277,9 @@ for my $line (<SNMPWALK>)
     $tmpname =~ s/.*devNetworkName\.//g;
     my ($oid_piece, $devNetworkName) = split(/ = STRING: /, $tmpname);
     my ($NetworkName,undef) = split(/ - /, $devNetworkName);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devNetworkName'}->{$devNetworkName} = $devNetworkName;
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'NetworkName'} = $NetworkName;
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devNetworkName'}->{$devNetworkName} = $devNetworkName;
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'NetworkName'} = $NetworkName;
   }
   elsif ( $line =~ /devInterfaceIndex/ )
   {
@@ -236,13 +287,13 @@ for my $line (<SNMPWALK>)
     $tmpname =~ s/.*devInterfaceIndex\.//g;
     my ($oid_piece, $devInterfaceIndex) = split(/ = INTEGER: /, $tmpname);
     ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndexes'}}, $devInterfaceIndex);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceName'} = '';
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceSentPkts'} = '';
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceRecvPkts'} = '';
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceSentBytes'} = '';
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceRecvBytes'} = '';
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndexes'}}, $devInterfaceIndex);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceName'} = '';
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceSentPkts'} = '';
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceRecvPkts'} = '';
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceSentBytes'} = '';
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$devInterfaceIndex}->{'devInterfaceRecvBytes'} = '';
   }
   elsif ( $line =~ /devInterfaceName/ )
   {
@@ -250,8 +301,8 @@ for my $line (<SNMPWALK>)
     $tmpname =~ s/.*devInterfaceName\.//g;
     my ($oid_piece, $devInterfaceName) = split(/ = STRING: /, $tmpname);
     ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceName'} = $devInterfaceName;
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceName'} = $devInterfaceName;
   }
   elsif ( $line =~ /devInterfaceSentPkts/ )
   {
@@ -259,8 +310,8 @@ for my $line (<SNMPWALK>)
     $tmpname =~ s/.*devInterfaceSentPkts\.//g;
     my ($oid_piece, $devInterfaceSentPkts) = split(/ = Counter32: /, $tmpname);
     ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceSentPkts'} = $devInterfaceSentPkts;
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceSentPkts'} = $devInterfaceSentPkts;
   }
   elsif ( $line =~ /devInterfaceRecvPkts/ )
   {
@@ -268,8 +319,8 @@ for my $line (<SNMPWALK>)
     $tmpname =~ s/.*devInterfaceRecvPkts\.//g;
     my ($oid_piece, $devInterfaceRecvPkts) = split(/ = Counter32: /, $tmpname);
     ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceRecvPkts'} = $devInterfaceRecvPkts;
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceRecvPkts'} = $devInterfaceRecvPkts;
   }
   elsif ( $line =~ /devInterfaceSentBytes/ )
   {
@@ -277,8 +328,8 @@ for my $line (<SNMPWALK>)
     $tmpname =~ s/.*devInterfaceSentBytes\.//g;
     my ($oid_piece, $devInterfaceSentBytes) = split(/ = Counter32: /, $tmpname);
     ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceSentBytes'} = $devInterfaceSentBytes;
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceSentBytes'} = $devInterfaceSentBytes;
   }
   elsif ( $line =~ /devInterfaceRecvBytes/ )
   {
@@ -286,8 +337,8 @@ for my $line (<SNMPWALK>)
     $tmpname =~ s/.*devInterfaceRecvBytes\.//g;
     my ($oid_piece, $devInterfaceRecvBytes) = split(/ = Counter32: /, $tmpname);
     ($oid_piece,$InterfaceIndex) = ($oid_piece =~ /(.*)\.(.+)/);
-    push(@{$href_curr->{$comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
-    $href_curr->{$comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceRecvBytes'} = $devInterfaceRecvBytes;
+    push(@{$href_curr->{$org_comm_v2c}->{$oid_piece}->{'original_lines'}}, $line);
+    $href_curr->{$org_comm_v2c}->{$oid_piece}->{'devInterfaceIndex'}->{$InterfaceIndex}->{'devInterfaceRecvBytes'} = $devInterfaceRecvBytes;
   }
 }
 
@@ -299,13 +350,13 @@ if ( $usedumper )
 # Copy href_curr to href_diff
 $href_diff = $href_curr;
 
-for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
+for my $oid ( sort keys %{$href_curr->{$org_comm_v2c}} )
 {
   my $devName = $hostname; # Assign the devName to be the same as the hostname to account for when the device has yet to be named through the dashboard. Otherwise it is blank
   my $network = '';
-  $devName = $href_curr->{$comm_v2c}->{$oid}->{'devName'} if ( $href_curr->{$comm_v2c}->{$oid}->{'devName'} );
-  $network = $href_curr->{$comm_v2c}->{$oid}->{'NetworkName'} if ($href_curr->{$comm_v2c}->{$oid}->{'NetworkName'} );
-  if ( $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'} )
+  $devName = $href_curr->{$org_comm_v2c}->{$oid}->{'devName'} if ( $href_curr->{$org_comm_v2c}->{$oid}->{'devName'} );
+  $network = $href_curr->{$org_comm_v2c}->{$oid}->{'NetworkName'} if ($href_curr->{$org_comm_v2c}->{$oid}->{'NetworkName'} );
+  if ( $href_curr->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'} )
   {
     if ( $tree )
     {
@@ -315,13 +366,13 @@ for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
       # Never prints to Log if $tree
       print "$network\n  - $devName\n";
     }
-    for my $ii ( sort {$a <=> $b} @{$href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndexes'}})
+    for my $ii ( sort {$a <=> $b} @{$href_curr->{$org_comm_v2c}->{$oid}->{'devInterfaceIndexes'}})
     {
-      my $InterfaceName = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceName'};
-      my $CURR_InterfaceSentPkts = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'};
-      my $CURR_InterfaceRecvPkts = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'};
-      my $CURR_InterfaceSentBytes = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'};
-      my $CURR_InterfaceRecvBytes = $href_curr->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'};
+      my $InterfaceName = $href_curr->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceName'};
+      my $CURR_InterfaceSentPkts = $href_curr->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'};
+      my $CURR_InterfaceRecvPkts = $href_curr->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'};
+      my $CURR_InterfaceSentBytes = $href_curr->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'};
+      my $CURR_InterfaceRecvBytes = $href_curr->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'};
 
       # Default DIFF to CURR
       my $DIFF_InterfaceSentPkts = $CURR_InterfaceSentPkts;
@@ -330,32 +381,32 @@ for my $oid ( sort keys %{$href_curr->{$comm_v2c}} )
       my $DIFF_InterfaceRecvBytes = $CURR_InterfaceRecvBytes;
 
       # Check if there is a previous hash value and if so update DIFF_ with the difference between the CURR and PREV
-      if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'} )
+      if ( $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'} )
       {
-        my $PREV_InterfaceSentPkts = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'};
+        my $PREV_InterfaceSentPkts = $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'};
         $DIFF_InterfaceSentPkts -= $PREV_InterfaceSentPkts if ( $CURR_InterfaceSentPkts >= $PREV_InterfaceSentPkts );
-        $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'} = $DIFF_InterfaceSentPkts; 
+        $href_diff->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentPkts'} = $DIFF_InterfaceSentPkts; 
       }
-      if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'} )
+      if ( $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'} )
       {
-        my $PREV_InterfaceRecvPkts = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'};
+        my $PREV_InterfaceRecvPkts = $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'};
         $DIFF_InterfaceRecvPkts -= $PREV_InterfaceRecvPkts if ( $CURR_InterfaceRecvPkts >= $PREV_InterfaceRecvPkts );
-        $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'} = $DIFF_InterfaceRecvPkts; 
+        $href_diff->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvPkts'} = $DIFF_InterfaceRecvPkts; 
       }
-      if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'} )
+      if ( $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'} )
       {
-        my $PREV_InterfaceSentBytes = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'};
+        my $PREV_InterfaceSentBytes = $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'};
         $DIFF_InterfaceSentBytes -= $PREV_InterfaceSentBytes if ( $CURR_InterfaceSentBytes >= $PREV_InterfaceSentBytes );
-        $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'} = $DIFF_InterfaceSentBytes; 
+        $href_diff->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceSentBytes'} = $DIFF_InterfaceSentBytes; 
       }
-      if ( $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'} )
+      if ( $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'} )
       {
-        my $PREV_InterfaceRecvBytes = $href_prev->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'};
+        my $PREV_InterfaceRecvBytes = $href_prev->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'};
         $DIFF_InterfaceRecvBytes -= $PREV_InterfaceRecvBytes if ( $CURR_InterfaceRecvBytes >= $PREV_InterfaceRecvBytes );
-        $href_diff->{$comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'} = $DIFF_InterfaceRecvBytes; 
+        $href_diff->{$org_comm_v2c}->{$oid}->{'devInterfaceIndex'}->{$ii}->{'devInterfaceRecvBytes'} = $DIFF_InterfaceRecvBytes; 
       }
 
-      if ( ! $tree && $hostname eq $devName ) 
+      if ( ! $tree && $devName =~ /$hostname/ ) 
       {
         $devName =~ s/\s+/-/g;
         $network =~ s/\s+/-/g;
