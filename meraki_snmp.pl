@@ -53,6 +53,7 @@ if (my $err = SUB_ReadCfg($config)) {
 my $debug            = $CFG::meraki{'options'}{'debug'};
 my $usedumper        = $CFG::meraki{'options'}{'usedumper'};
 my $tree             = $CFG::meraki{'options'}{'tree'};
+my $mib_dir          = $CFG::meraki{'setup'}{'mib_dir'};
 my $org              = '';
 for my $k ( keys %{$CFG::meraki{'organization'}} ) { $org = $k };
 my @networks         = keys %{$CFG::meraki{'organization'}{$org}{'network'}};
@@ -255,8 +256,8 @@ else
 }
 
 SUB_appendLogs("Performing snmpwalk of \"snmp.meraki.com:16100\" using SNMPv2c community string of \"$org_comm_v2c\"");
-SUB_appendLogs("Running SNMPWALK: \"snmpwalk -v2c -c $org_comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |\"");
-open(SNMPWALK, "snmpwalk -v2c -c $org_comm_v2c -Ob -M +. -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |") or die SUB_appendLogs("FATAL: Cannot to run snmpwalk! :: $!");
+SUB_appendLogs("Running SNMPWALK: \"snmpwalk -v2c -c $org_comm_v2c -Ob -M $mib_dir -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |\"");
+open(SNMPWALK, "snmpwalk -v2c -c $org_comm_v2c -Ob -M $mib_dir -m +MERAKI-CLOUD-CONTROLLER-MIB snmp.meraki.com:16100 .1 |") or die SUB_appendLogs("FATAL: Cannot to run snmpwalk! :: $!");
 
 # Used to test against static set of data in a file. Content in the file should come from the 
 # output of the open(SNMPWALK... line above. If you uncomment the lines below comment the 
